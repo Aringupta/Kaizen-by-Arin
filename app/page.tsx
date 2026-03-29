@@ -5,14 +5,15 @@ import HabitItem from "./components/HabitItem";
 import DaySelector from "./components/DaySelector";
 import FailureModal, { type FailureReason } from "./components/FailureModal";
 import type { Habit } from "./lib/types";
-import { save, load } from "./lib/storage";
+import { save, load, remove } from "./lib/storage";
+import { getLogicalDate, getLogicalDow, evaluateMissedDays } from "./lib/evaluation";
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 
 const DEFAULT_HABITS: Habit[] = [
-  { name: "Hair Treatment", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, lastCompletedDate: null },
-  { name: "Gym", activeDays: [1, 2, 3, 4], currentStreak: 0, longestStreak: 0, lastCompletedDate: null },
-  { name: "Sleep Target", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, lastCompletedDate: null },
+  { name: "Hair Treatment", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
+  { name: "Gym", activeDays: [1, 2, 3, 4], currentStreak: 0, longestStreak: 0, completions: {} },
+  { name: "Sleep Target", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
 ];
 
 interface CompletionState {
@@ -30,14 +31,6 @@ interface EvalState {
   lastEvaluatedDate: string | null;
   totalDays: number;
   failures: FailureRecord[];
-}
-
-function getToday(): string {
-  return new Date().toISOString().slice(0, 10);
-}
-
-function getTodayDow(): number {
-  return new Date().getDay();
 }
 
 function getIdentityLine(hadFailure: boolean, minStreak: number): string {
@@ -128,8 +121,8 @@ export default function Home() {
   const [hydrated, setHydrated] = useState(false);
   const inputRef = useRef<HTMLInputElement>(null);
 
-  const todayDow = getTodayDow();
-  const today = getToday();
+  const today = getLogicalDate();
+  const todayDow = getLogicalDow();
   const todaysHabits = habits.filter((h) => h.activeDays.includes(todayDow));
 
   const completedCount = todaysHabits.filter((h) => completed.has(h.name)).length;
@@ -158,55 +151,84 @@ export default function Home() {
   const hasAnyStreak = todaysHabits.some((h) => h.currentStreak > 0);
   const showWarning = hasAnyStreak && someComplete && !allComplete;
 
-  // Hydrate from localStorage
+  // Hydrate from localStorage + evaluate missed days
   useEffect(() => {
-    // Habits
+    const logicalToday = getLogicalDate();
+
+    // --- Load habits ---
+    let loadedHabits = DEFAULT_HABITS;
     const storedHabits = load<Habit[] | string[]>("habits");
     if (storedHabits && storedHabits.length > 0) {
       if (typeof storedHabits[0] === "string") {
-        // Migrate old string[] format
-        const migrated: Habit[] = (storedHabits as string[]).map((name) => ({
-          name, activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, lastCompletedDate: null,
+        loadedHabits = (storedHabits as string[]).map((name) => ({
+          name, activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {},
         }));
-        setHabits(migrated);
       } else {
-        // Migrate old Habit format without streak fields
-        const migrated: Habit[] = (storedHabits as Habit[]).map((h) => ({
+        loadedHabits = (storedHabits as Habit[]).map((h) => ({
           ...h,
           currentStreak: h.currentStreak ?? 0,
           longestStreak: h.longestStreak ?? 0,
-          lastCompletedDate: h.lastCompletedDate ?? null,
+          completions: h.completions ?? {},
         }));
-        setHabits(migrated);
       }
     }
 
-    // Completions
+    // Migrate old separate completion state into habit completions
     const storedCompletion = load<CompletionState>("completion");
-    if (storedCompletion && storedCompletion.date === getToday()) {
-      setCompleted(new Set(storedCompletion.completed));
+    if (storedCompletion?.date && storedCompletion.completed.length > 0) {
+      const cDate = storedCompletion.date;
+      const cNames = new Set(storedCompletion.completed);
+      loadedHabits = loadedHabits.map((h) =>
+        cNames.has(h.name) && !h.completions[cDate]
+          ? { ...h, completions: { ...h.completions, [cDate]: true } }
+          : h
+      );
+      remove("completion");
     }
 
-    // Eval state (migrated from old streak data)
+    // --- Load eval state ---
+    let loadedEval: EvalState = { lastEvaluatedDate: null, totalDays: 0, failures: [] };
     const storedEval = load<EvalState>("eval");
     if (storedEval) {
-      setEvalState(storedEval);
+      loadedEval = storedEval;
     } else {
-      // Migrate from old global streak if it exists
       const oldStreak = load<{
         totalDays?: number;
         lastEvaluatedDate?: string | null;
         failures?: FailureRecord[];
       }>("streak");
       if (oldStreak) {
-        setEvalState({
+        loadedEval = {
           lastEvaluatedDate: oldStreak.lastEvaluatedDate ?? null,
           totalDays: oldStreak.totalDays ?? 0,
           failures: oldStreak.failures ?? [],
-        });
+        };
       }
     }
 
+    // --- Evaluate missed days ---
+    const { habits: evaluatedHabits, newLastEvaluatedDate, evaluatedScheduledDays } =
+      evaluateMissedDays(loadedHabits, loadedEval.lastEvaluatedDate, logicalToday);
+    loadedHabits = evaluatedHabits;
+    if (newLastEvaluatedDate !== loadedEval.lastEvaluatedDate) {
+      loadedEval = {
+        ...loadedEval,
+        lastEvaluatedDate: newLastEvaluatedDate,
+        totalDays: loadedEval.totalDays + evaluatedScheduledDays,
+      };
+    }
+
+    // --- Derive today's completed Set from habit completions ---
+    const todayCompleted = new Set<string>();
+    for (const h of loadedHabits) {
+      if (h.completions[logicalToday]) {
+        todayCompleted.add(h.name);
+      }
+    }
+
+    setHabits(loadedHabits);
+    setCompleted(todayCompleted);
+    setEvalState(loadedEval);
     setHydrated(true);
   }, []);
 
@@ -214,13 +236,6 @@ export default function Home() {
   useEffect(() => {
     if (hydrated) save("habits", habits);
   }, [habits, hydrated]);
-
-  // Persist completions
-  useEffect(() => {
-    if (hydrated) {
-      save("completion", { date: getToday(), completed: Array.from(completed) });
-    }
-  }, [completed, hydrated]);
 
   // Persist eval state
   useEffect(() => {
@@ -256,12 +271,9 @@ export default function Home() {
     if (neutralDay) return;
     if (alreadyEvaluated) return;
 
-    const todayStr = getToday();
-
     // Update per-habit streaks
     setHabits((prev) =>
       prev.map((h) => {
-        // Only evaluate habits scheduled for today
         if (!h.activeDays.includes(todayDow)) return h;
 
         if (completed.has(h.name)) {
@@ -270,11 +282,9 @@ export default function Home() {
             ...h,
             currentStreak: newStreak,
             longestStreak: Math.max(h.longestStreak, newStreak),
-            lastCompletedDate: todayStr,
           };
         }
 
-        // Incomplete — reset
         return { ...h, currentStreak: 0 };
       })
     );
@@ -282,7 +292,7 @@ export default function Home() {
     // Update eval state
     setEvalState((prev) => {
       const next: EvalState = {
-        lastEvaluatedDate: todayStr,
+        lastEvaluatedDate: today,
         totalDays: prev.totalDays + 1,
         failures: prev.failures,
       };
@@ -290,7 +300,7 @@ export default function Home() {
       if (!allDone && missed && reason) {
         next.failures = [
           ...prev.failures,
-          { date: todayStr, missedHabits: missed, reason },
+          { date: today, missedHabits: missed, reason },
         ];
       }
 
@@ -299,6 +309,8 @@ export default function Home() {
   }
 
   function handleToggle(habitName: string) {
+    const nowCompleted = !completed.has(habitName);
+
     setCompleted((prev) => {
       const next = new Set(prev);
       if (next.has(habitName)) {
@@ -308,6 +320,18 @@ export default function Home() {
       }
       return next;
     });
+
+    // Persist completion into the habit's date-keyed record
+    setHabits((prev) => prev.map((h) => {
+      if (h.name !== habitName) return h;
+      const completions = { ...h.completions };
+      if (nowCompleted) {
+        completions[today] = true;
+      } else {
+        delete completions[today];
+      }
+      return { ...h, completions };
+    }));
   }
 
   function handleAdd() {
@@ -318,7 +342,7 @@ export default function Home() {
         activeDays: newHabitDays,
         currentStreak: 0,
         longestStreak: 0,
-        lastCompletedDate: null,
+        completions: {},
       }]);
     }
     setNewHabit("");

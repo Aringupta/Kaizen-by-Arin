@@ -3,5 +3,5 @@ export interface Habit {
   activeDays: number[]; // 0 = Sunday, 1 = Monday, ..., 6 = Saturday
   currentStreak: number;
   longestStreak: number;
-  lastCompletedDate: string | null;
+  completions: Record<string, boolean>; // YYYY-MM-DD → true
 }
