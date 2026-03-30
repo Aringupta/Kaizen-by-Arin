@@ -33,6 +33,27 @@ interface EvalState {
   failures: FailureRecord[];
 }
 
+const DAY_SHORT = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+
+function formatSchedule(days: number[]): string {
+  if (days.length === 7) return "Every day";
+  if (days.length === 0) return "No days";
+  const sorted = [...days].sort((a, b) => a - b);
+  const parts: string[] = [];
+  let i = 0;
+  while (i < sorted.length) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    if (j - i >= 2) {
+      parts.push(`${DAY_SHORT[sorted[i]]}\u2013${DAY_SHORT[sorted[j]]}`);
+    } else {
+      for (let k = i; k <= j; k++) parts.push(DAY_SHORT[sorted[k]]);
+    }
+    i = j + 1;
+  }
+  return parts.join(", ");
+}
+
 function getIdentityLine(hadFailure: boolean, minStreak: number): string {
   if (hadFailure) return "This is not who you said you are.";
   if (minStreak >= 14) return "This is who you are now.";
@@ -124,6 +145,7 @@ export default function Home() {
   const today = getLogicalDate();
   const todayDow = getLogicalDow();
   const todaysHabits = habits.filter((h) => h.activeDays.includes(todayDow));
+  const inactiveHabits = habits.filter((h) => !h.activeDays.includes(todayDow));
 
   const completedCount = todaysHabits.filter((h) => completed.has(h.name)).length;
   const totalCount = todaysHabits.length;
@@ -418,13 +440,9 @@ export default function Home() {
           </p>
         )}
 
-        {/* Habit Section */}
+        {/* Habit Section — Today */}
         <section className="mb-12">
-          {neutralDay ? (
-            <p className="text-center font-body text-muted text-base py-8">
-              No habits scheduled for today.
-            </p>
-          ) : (
+          {todaysHabits.length > 0 ? (
             <ul className="flex flex-col">
               {todaysHabits.map((habit) => (
                 <HabitItem
@@ -439,6 +457,10 @@ export default function Home() {
                 />
               ))}
             </ul>
+          ) : (
+            <p className="text-center font-body text-muted text-base py-8">
+              No habits scheduled for today.
+            </p>
           )}
 
           {/* Inline Add */}
@@ -491,6 +513,31 @@ export default function Home() {
               </span>
               <span className="font-ui text-sm uppercase tracking-widest">Add habit</span>
             </button>
+          )}
+
+          {/* Not Today */}
+          {inactiveHabits.length > 0 && (
+            <>
+              <p className="font-ui text-xs uppercase tracking-widest text-muted/50 mt-8 mb-2">
+                not today
+              </p>
+              <ul className="flex flex-col">
+                {inactiveHabits.map((habit) => (
+                  <HabitItem
+                    key={habit.name}
+                    name={habit.name}
+                    activeDays={habit.activeDays}
+                    currentStreak={habit.currentStreak}
+                    completed={false}
+                    inactive
+                    schedule={formatSchedule(habit.activeDays)}
+                    onToggle={() => {}}
+                    onRemove={() => handleRemove(habit.name)}
+                    onUpdateDays={(days) => handleUpdateDays(habit.name, days)}
+                  />
+                ))}
+              </ul>
+            </>
           )}
         </section>
 

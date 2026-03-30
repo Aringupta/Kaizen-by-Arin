@@ -11,40 +11,53 @@ interface HabitItemProps {
   onToggle: () => void;
   onRemove: () => void;
   onUpdateDays: (days: number[]) => void;
+  inactive?: boolean;
+  schedule?: string;
 }
 
 export default function HabitItem({
   name, activeDays, currentStreak, completed, onToggle, onRemove, onUpdateDays,
+  inactive, schedule,
 }: HabitItemProps) {
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [editing, setEditing] = useState(false);
 
   return (
-    <li className="border-b border-rule">
+    <li className={`border-b border-rule${inactive ? " opacity-40" : ""}`}>
       <div className="flex items-center">
-        <button
-          onClick={onToggle}
-          className={`flex-1 flex items-center gap-4 py-5 text-left cursor-pointer ${
-            completed ? "opacity-40" : ""
-          }`}
-        >
-          <span
-            className={`w-5 h-5 border rounded-sm flex-shrink-0 flex items-center justify-center ${
-              completed ? "border-muted bg-foreground" : "border-foreground"
+        {inactive ? (
+          <div className="flex-1 flex items-center gap-4 py-4">
+            <span className="w-5 h-5 flex-shrink-0" />
+            <span className="font-body text-base text-muted">{name}</span>
+            {schedule && (
+              <span className="font-ui text-xs text-muted/70">&mdash; {schedule}</span>
+            )}
+          </div>
+        ) : (
+          <button
+            onClick={onToggle}
+            className={`flex-1 flex items-center gap-4 py-5 text-left cursor-pointer ${
+              completed ? "opacity-40" : ""
             }`}
           >
-            {completed && (
-              <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="1.5">
-                <polyline points="2.5,6 5,9 9.5,3" />
-              </svg>
-            )}
-          </span>
-          <span className={`font-body text-lg ${completed ? "line-through" : ""}`}>
-            {name}
-          </span>
-        </button>
+            <span
+              className={`w-5 h-5 border rounded-sm flex-shrink-0 flex items-center justify-center ${
+                completed ? "border-muted bg-foreground" : "border-foreground"
+              }`}
+            >
+              {completed && (
+                <svg width="12" height="12" viewBox="0 0 12 12" fill="none" stroke="white" strokeWidth="1.5">
+                  <polyline points="2.5,6 5,9 9.5,3" />
+                </svg>
+              )}
+            </span>
+            <span className={`font-body text-lg ${completed ? "line-through" : ""}`}>
+              {name}
+            </span>
+          </button>
+        )}
 
-        {currentStreak > 0 && (
+        {!inactive && currentStreak > 0 && (
           <span className="font-ui text-xs text-muted tabular-nums mr-2">
             {currentStreak}d
           </span>
