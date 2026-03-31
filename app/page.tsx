@@ -4,17 +4,28 @@ import { useState, useRef, useEffect, useMemo } from "react";
 import HabitItem from "./components/HabitItem";
 import DaySelector from "./components/DaySelector";
 import FailureModal, { type FailureReason } from "./components/FailureModal";
-import type { Habit } from "./lib/types";
+import type { Habit, HabitCategory } from "./lib/types";
+import { CATEGORY_ORDER } from "./lib/types";
 import { save, load, remove } from "./lib/storage";
 import { getLogicalDate, getLogicalDow, evaluateMissedDays } from "./lib/evaluation";
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
 
 const DEFAULT_HABITS: Habit[] = [
-  { name: "Hair Treatment", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
-  { name: "Gym", activeDays: [1, 2, 3, 4], currentStreak: 0, longestStreak: 0, completions: {} },
-  { name: "Sleep Target", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
+  { name: "Hair Treatment", category: "Personal", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
+  { name: "Gym", category: "Wellness", activeDays: [1, 2, 3, 4], currentStreak: 0, longestStreak: 0, completions: {} },
+  { name: "Sleep Target", category: "Wellness", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
 ];
+
+function groupByCategory(habits: Habit[]): { category: HabitCategory; habits: Habit[] }[] {
+  const map = new Map<HabitCategory, Habit[]>();
+  for (const h of habits) {
+    const list = map.get(h.category) || [];
+    list.push(h);
+    map.set(h.category, list);
+  }
+  return CATEGORY_ORDER.filter((c) => map.has(c)).map((c) => ({ category: c, habits: map.get(c)! }));
+}
 
 interface CompletionState {
   date: string;
@@ -137,6 +148,7 @@ export default function Home() {
   const [adding, setAdding] = useState(false);
   const [newHabit, setNewHabit] = useState("");
   const [newHabitDays, setNewHabitDays] = useState<number[]>(ALL_DAYS);
+  const [newHabitCategory, setNewHabitCategory] = useState<HabitCategory>("Wellness");
   const [showFailure, setShowFailure] = useState(false);
   const [tick, setTick] = useState(0);
   const [hydrated, setHydrated] = useState(false);
@@ -146,6 +158,8 @@ export default function Home() {
   const todayDow = getLogicalDow();
   const todaysHabits = habits.filter((h) => h.activeDays.includes(todayDow));
   const inactiveHabits = habits.filter((h) => !h.activeDays.includes(todayDow));
+  const todayGrouped = groupByCategory(todaysHabits);
+  const inactiveGrouped = groupByCategory(inactiveHabits);
 
   const completedCount = todaysHabits.filter((h) => completed.has(h.name)).length;
   const totalCount = todaysHabits.length;
@@ -183,11 +197,12 @@ export default function Home() {
     if (storedHabits && storedHabits.length > 0) {
       if (typeof storedHabits[0] === "string") {
         loadedHabits = (storedHabits as string[]).map((name) => ({
-          name, activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {},
+          name, category: "Wellness" as HabitCategory, activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {},
         }));
       } else {
         loadedHabits = (storedHabits as Habit[]).map((h) => ({
           ...h,
+          category: h.category ?? "Wellness",
           currentStreak: h.currentStreak ?? 0,
           longestStreak: h.longestStreak ?? 0,
           completions: h.completions ?? {},
@@ -361,6 +376,7 @@ export default function Home() {
     if (trimmed && !habits.some((h) => h.name === trimmed) && newHabitDays.length > 0) {
       setHabits([...habits, {
         name: trimmed,
+        category: newHabitCategory,
         activeDays: newHabitDays,
         currentStreak: 0,
         longestStreak: 0,
@@ -369,6 +385,7 @@ export default function Home() {
     }
     setNewHabit("");
     setNewHabitDays(ALL_DAYS);
+    setNewHabitCategory("Wellness");
     setAdding(false);
   }
 
@@ -442,21 +459,28 @@ export default function Home() {
 
         {/* Habit Section — Today */}
         <section className="mb-12">
-          {todaysHabits.length > 0 ? (
-            <ul className="flex flex-col">
-              {todaysHabits.map((habit) => (
-                <HabitItem
-                  key={habit.name}
-                  name={habit.name}
-                  activeDays={habit.activeDays}
-                  currentStreak={habit.currentStreak}
-                  completed={completed.has(habit.name)}
-                  onToggle={() => handleToggle(habit.name)}
-                  onRemove={() => handleRemove(habit.name)}
-                  onUpdateDays={(days) => handleUpdateDays(habit.name, days)}
-                />
-              ))}
-            </ul>
+          {todayGrouped.length > 0 ? (
+            todayGrouped.map((group) => (
+              <div key={group.category}>
+                <p className="font-ui text-xs uppercase tracking-widest text-muted mt-8 first:mt-0 mb-1">
+                  {group.category}
+                </p>
+                <ul className="flex flex-col">
+                  {group.habits.map((habit) => (
+                    <HabitItem
+                      key={habit.name}
+                      name={habit.name}
+                      activeDays={habit.activeDays}
+                      currentStreak={habit.currentStreak}
+                      completed={completed.has(habit.name)}
+                      onToggle={() => handleToggle(habit.name)}
+                      onRemove={() => handleRemove(habit.name)}
+                      onUpdateDays={(days) => handleUpdateDays(habit.name, days)}
+                    />
+                  ))}
+                </ul>
+              </div>
+            ))
           ) : (
             <p className="text-center font-body text-muted text-base py-8">
               No habits scheduled for today.
@@ -475,11 +499,27 @@ export default function Home() {
                   onChange={(e) => setNewHabit(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleAdd();
-                    if (e.key === "Escape") { setAdding(false); setNewHabit(""); setNewHabitDays(ALL_DAYS); }
+                    if (e.key === "Escape") { setAdding(false); setNewHabit(""); setNewHabitDays(ALL_DAYS); setNewHabitCategory("Wellness"); }
                   }}
                   placeholder="new habit"
                   className="flex-1 font-body text-lg bg-transparent outline-none placeholder:text-muted/50"
                 />
+              </div>
+              <div className="mt-3 pl-9 flex items-center gap-4">
+                <p className="font-ui text-xs uppercase tracking-widest text-muted">category</p>
+                <div className="flex gap-2">
+                  {CATEGORY_ORDER.map((cat) => (
+                    <button
+                      key={cat}
+                      onClick={() => setNewHabitCategory(cat)}
+                      className={`font-ui text-xs uppercase tracking-widest px-2 py-0.5 cursor-pointer ${
+                        newHabitCategory === cat ? "text-foreground border-b border-foreground" : "text-muted"
+                      }`}
+                    >
+                      {cat}
+                    </button>
+                  ))}
+                </div>
               </div>
               <div className="mt-3 pl-9 flex items-center gap-4">
                 <p className="font-ui text-xs uppercase tracking-widest text-muted">repeat</p>
@@ -493,7 +533,7 @@ export default function Home() {
                   add
                 </button>
                 <button
-                  onClick={() => { setAdding(false); setNewHabit(""); setNewHabitDays(ALL_DAYS); }}
+                  onClick={() => { setAdding(false); setNewHabit(""); setNewHabitDays(ALL_DAYS); setNewHabitCategory("Wellness"); }}
                   className="font-ui text-xs uppercase tracking-widest text-muted cursor-pointer"
                 >
                   cancel
@@ -516,27 +556,34 @@ export default function Home() {
           )}
 
           {/* Not Today */}
-          {inactiveHabits.length > 0 && (
+          {inactiveGrouped.length > 0 && (
             <>
-              <p className="font-ui text-xs uppercase tracking-widest text-muted/50 mt-8 mb-2">
+              <p className="font-ui text-xs uppercase tracking-widest text-muted/50 mt-10 mb-1">
                 not today
               </p>
-              <ul className="flex flex-col">
-                {inactiveHabits.map((habit) => (
-                  <HabitItem
-                    key={habit.name}
-                    name={habit.name}
-                    activeDays={habit.activeDays}
-                    currentStreak={habit.currentStreak}
-                    completed={false}
-                    inactive
-                    schedule={formatSchedule(habit.activeDays)}
-                    onToggle={() => {}}
-                    onRemove={() => handleRemove(habit.name)}
-                    onUpdateDays={(days) => handleUpdateDays(habit.name, days)}
-                  />
-                ))}
-              </ul>
+              {inactiveGrouped.map((group) => (
+                <div key={group.category}>
+                  <p className="font-ui text-xs uppercase tracking-widest text-muted/40 mt-4 mb-1">
+                    {group.category}
+                  </p>
+                  <ul className="flex flex-col">
+                    {group.habits.map((habit) => (
+                      <HabitItem
+                        key={habit.name}
+                        name={habit.name}
+                        activeDays={habit.activeDays}
+                        currentStreak={habit.currentStreak}
+                        completed={false}
+                        inactive
+                        schedule={formatSchedule(habit.activeDays)}
+                        onToggle={() => {}}
+                        onRemove={() => handleRemove(habit.name)}
+                        onUpdateDays={(days) => handleUpdateDays(habit.name, days)}
+                      />
+                    ))}
+                  </ul>
+                </div>
+              ))}
             </>
           )}
         </section>
