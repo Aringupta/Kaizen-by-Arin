@@ -1,22 +1,26 @@
 "use client";
 
 import { useState } from "react";
+import type { HabitCategory } from "../lib/types";
 import DaySelector from "./DaySelector";
 
 interface HabitItemProps {
   name: string;
   activeDays: number[];
+  category: HabitCategory;
+  categories: HabitCategory[];
   currentStreak: number;
   completed: boolean;
   onToggle: () => void;
   onRemove: () => void;
   onUpdateDays: (days: number[]) => void;
+  onUpdateCategory: (category: HabitCategory) => void;
   inactive?: boolean;
   schedule?: string;
 }
 
 export default function HabitItem({
-  name, activeDays, currentStreak, completed, onToggle, onRemove, onUpdateDays,
+  name, activeDays, category, categories, currentStreak, completed, onToggle, onRemove, onUpdateDays, onUpdateCategory,
   inactive, schedule,
 }: HabitItemProps) {
   const [confirmRemove, setConfirmRemove] = useState(false);
@@ -107,6 +111,23 @@ export default function HabitItem({
 
       {editing && (
         <div className="pb-4 pl-9">
+          <div className="mb-3">
+            <p className="font-ui text-xs uppercase tracking-widest text-muted mb-2">category</p>
+            <div className="flex flex-wrap gap-2">
+              {categories.map((option) => (
+                <button
+                  key={option}
+                  type="button"
+                  onClick={() => onUpdateCategory(option)}
+                  className={`font-ui text-xs uppercase tracking-widest px-2 py-0.5 cursor-pointer ${
+                    category === option ? "text-foreground border-b border-foreground" : "text-muted"
+                  }`}
+                >
+                  {option}
+                </button>
+              ))}
+            </div>
+          </div>
           <p className="font-ui text-xs uppercase tracking-widest text-muted mb-2">repeat</p>
           <DaySelector activeDays={activeDays} onChange={onUpdateDays} />
         </div>

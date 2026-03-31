@@ -10,6 +10,7 @@ import { save, load, remove } from "./lib/storage";
 import { getLogicalDate, getLogicalDow, evaluateMissedDays } from "./lib/evaluation";
 
 const ALL_DAYS = [0, 1, 2, 3, 4, 5, 6];
+const DEFAULT_CATEGORIES: HabitCategory[] = [...CATEGORY_ORDER];
 
 const DEFAULT_HABITS: Habit[] = [
   { name: "Hair Treatment", category: "Personal", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
@@ -17,14 +18,31 @@ const DEFAULT_HABITS: Habit[] = [
   { name: "Sleep Target", category: "Wellness", activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {} },
 ];
 
-function groupByCategory(habits: Habit[]): { category: HabitCategory; habits: Habit[] }[] {
+function groupByCategory(
+  habits: Habit[],
+  categories: HabitCategory[],
+): { category: HabitCategory; habits: Habit[] }[] {
   const map = new Map<HabitCategory, Habit[]>();
   for (const h of habits) {
     const list = map.get(h.category) || [];
     list.push(h);
     map.set(h.category, list);
   }
-  return CATEGORY_ORDER.filter((c) => map.has(c)).map((c) => ({ category: c, habits: map.get(c)! }));
+
+  const orderedCategories = [...categories];
+  for (const category of map.keys()) {
+    if (!orderedCategories.includes(category)) {
+      orderedCategories.push(category);
+    }
+  }
+
+  return orderedCategories
+    .filter((c) => map.has(c))
+    .map((c) => ({ category: c, habits: map.get(c)! }));
+}
+
+function normalizeCategoryName(value: string): string {
+  return value.trim().replace(/\s+/g, " ");
 }
 
 interface CompletionState {
@@ -140,15 +158,18 @@ function getRealityLine(
 }
 
 export default function Home() {
+  const [categories, setCategories] = useState<HabitCategory[]>(DEFAULT_CATEGORIES);
   const [habits, setHabits] = useState<Habit[]>(DEFAULT_HABITS);
   const [completed, setCompleted] = useState<Set<string>>(new Set());
   const [evalState, setEvalState] = useState<EvalState>({
     lastEvaluatedDate: null, totalDays: 0, failures: [],
   });
   const [adding, setAdding] = useState(false);
+  const [managingCategories, setManagingCategories] = useState(false);
   const [newHabit, setNewHabit] = useState("");
   const [newHabitDays, setNewHabitDays] = useState<number[]>(ALL_DAYS);
-  const [newHabitCategory, setNewHabitCategory] = useState<HabitCategory>("Wellness");
+  const [newHabitCategory, setNewHabitCategory] = useState<HabitCategory>(DEFAULT_CATEGORIES[0]);
+  const [newCategoryName, setNewCategoryName] = useState("");
   const [showFailure, setShowFailure] = useState(false);
   const [tick, setTick] = useState(0);
   const [hydrated, setHydrated] = useState(false);
@@ -158,8 +179,8 @@ export default function Home() {
   const todayDow = getLogicalDow();
   const todaysHabits = habits.filter((h) => h.activeDays.includes(todayDow));
   const inactiveHabits = habits.filter((h) => !h.activeDays.includes(todayDow));
-  const todayGrouped = groupByCategory(todaysHabits);
-  const inactiveGrouped = groupByCategory(inactiveHabits);
+  const todayGrouped = groupByCategory(todaysHabits, categories);
+  const inactiveGrouped = groupByCategory(inactiveHabits, categories);
 
   const completedCount = todaysHabits.filter((h) => completed.has(h.name)).length;
   const totalCount = todaysHabits.length;
@@ -190,6 +211,10 @@ export default function Home() {
   // Hydrate from localStorage + evaluate missed days
   useEffect(() => {
     const logicalToday = getLogicalDate();
+    const storedCategories = load<HabitCategory[]>("categories");
+    const loadedCategories = storedCategories && storedCategories.length > 0
+      ? storedCategories.map(normalizeCategoryName).filter(Boolean)
+      : DEFAULT_CATEGORIES;
 
     // --- Load habits ---
     let loadedHabits = DEFAULT_HABITS;
@@ -197,12 +222,12 @@ export default function Home() {
     if (storedHabits && storedHabits.length > 0) {
       if (typeof storedHabits[0] === "string") {
         loadedHabits = (storedHabits as string[]).map((name) => ({
-          name, category: "Wellness" as HabitCategory, activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {},
+          name, category: loadedCategories[0], activeDays: ALL_DAYS, currentStreak: 0, longestStreak: 0, completions: {},
         }));
       } else {
         loadedHabits = (storedHabits as Habit[]).map((h) => ({
           ...h,
-          category: h.category ?? "Wellness",
+          category: normalizeCategoryName(h.category ?? "") || loadedCategories[0],
           currentStreak: h.currentStreak ?? 0,
           longestStreak: h.longestStreak ?? 0,
           completions: h.completions ?? {},
@@ -263,11 +288,18 @@ export default function Home() {
       }
     }
 
+    setCategories(loadedCategories);
     setHabits(loadedHabits);
     setCompleted(todayCompleted);
     setEvalState(loadedEval);
+    setNewHabitCategory(loadedCategories[0]);
     setHydrated(true);
   }, []);
+
+  // Persist categories
+  useEffect(() => {
+    if (hydrated) save("categories", categories);
+  }, [categories, hydrated]);
 
   // Persist habits
   useEffect(() => {
@@ -284,6 +316,12 @@ export default function Home() {
     const interval = setInterval(() => setTick((t) => t + 1), 30000);
     return () => clearInterval(interval);
   }, []);
+
+  useEffect(() => {
+    if (!categories.includes(newHabitCategory)) {
+      setNewHabitCategory(categories[0] ?? DEFAULT_CATEGORIES[0]);
+    }
+  }, [categories, newHabitCategory]);
 
   // Auto-evaluate when all today's habits are completed
   useEffect(() => {
@@ -385,7 +423,7 @@ export default function Home() {
     }
     setNewHabit("");
     setNewHabitDays(ALL_DAYS);
-    setNewHabitCategory("Wellness");
+    setNewHabitCategory(categories[0] ?? DEFAULT_CATEGORIES[0]);
     setAdding(false);
   }
 
@@ -404,8 +442,54 @@ export default function Home() {
     ));
   }
 
+  function handleUpdateCategory(habitName: string, category: HabitCategory) {
+    setHabits(habits.map((h) =>
+      h.name === habitName ? { ...h, category } : h
+    ));
+  }
+
+  function handleAddCategory() {
+    const normalized = normalizeCategoryName(newCategoryName);
+    if (!normalized || categories.includes(normalized)) return;
+
+    setCategories([...categories, normalized]);
+    setNewHabitCategory(normalized);
+    setNewCategoryName("");
+  }
+
+  function handleRenameCategory(previous: HabitCategory, nextValue: string) {
+    const normalized = normalizeCategoryName(nextValue);
+    if (!normalized || normalized === previous || categories.includes(normalized)) return;
+
+    setCategories(categories.map((category) => (
+      category === previous ? normalized : category
+    )));
+    setHabits(habits.map((habit) => (
+      habit.category === previous ? { ...habit, category: normalized } : habit
+    )));
+    if (newHabitCategory === previous) {
+      setNewHabitCategory(normalized);
+    }
+  }
+
+  function handleRemoveCategory(categoryToRemove: HabitCategory) {
+    if (categories.length <= 1) return;
+
+    const remaining = categories.filter((category) => category !== categoryToRemove);
+    const fallback = remaining[0];
+
+    setCategories(remaining);
+    setHabits(habits.map((habit) => (
+      habit.category === categoryToRemove ? { ...habit, category: fallback } : habit
+    )));
+    if (newHabitCategory === categoryToRemove) {
+      setNewHabitCategory(fallback);
+    }
+  }
+
   function openAddInput() {
     setAdding(true);
+    setManagingCategories(false);
     setTimeout(() => inputRef.current?.focus(), 0);
   }
 
@@ -471,11 +555,14 @@ export default function Home() {
                       key={habit.name}
                       name={habit.name}
                       activeDays={habit.activeDays}
+                      category={habit.category}
+                      categories={categories}
                       currentStreak={habit.currentStreak}
                       completed={completed.has(habit.name)}
                       onToggle={() => handleToggle(habit.name)}
                       onRemove={() => handleRemove(habit.name)}
                       onUpdateDays={(days) => handleUpdateDays(habit.name, days)}
+                      onUpdateCategory={(category) => handleUpdateCategory(habit.name, category)}
                     />
                   ))}
                 </ul>
@@ -499,7 +586,14 @@ export default function Home() {
                   onChange={(e) => setNewHabit(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter") handleAdd();
-                    if (e.key === "Escape") { setAdding(false); setNewHabit(""); setNewHabitDays(ALL_DAYS); setNewHabitCategory("Wellness"); }
+                    if (e.key === "Escape") {
+                      setAdding(false);
+                      setManagingCategories(false);
+                      setNewHabit("");
+                      setNewHabitDays(ALL_DAYS);
+                      setNewHabitCategory(categories[0] ?? DEFAULT_CATEGORIES[0]);
+                      setNewCategoryName("");
+                    }
                   }}
                   placeholder="new habit"
                   className="flex-1 font-body text-lg bg-transparent outline-none placeholder:text-muted/50"
@@ -507,10 +601,11 @@ export default function Home() {
               </div>
               <div className="mt-3 pl-9 flex items-center gap-4">
                 <p className="font-ui text-xs uppercase tracking-widest text-muted">category</p>
-                <div className="flex gap-2">
-                  {CATEGORY_ORDER.map((cat) => (
+                <div className="flex flex-wrap gap-2">
+                  {categories.map((cat) => (
                     <button
                       key={cat}
+                      type="button"
                       onClick={() => setNewHabitCategory(cat)}
                       className={`font-ui text-xs uppercase tracking-widest px-2 py-0.5 cursor-pointer ${
                         newHabitCategory === cat ? "text-foreground border-b border-foreground" : "text-muted"
@@ -521,6 +616,64 @@ export default function Home() {
                   ))}
                 </div>
               </div>
+              <div className="mt-3 pl-9">
+                <button
+                  type="button"
+                  onClick={() => setManagingCategories((prev) => !prev)}
+                  className="font-ui text-xs uppercase tracking-widest text-muted hover:text-foreground cursor-pointer"
+                >
+                  {managingCategories ? "done editing categories" : "edit categories"}
+                </button>
+              </div>
+              {managingCategories && (
+                <div className="mt-4 pl-9 border-l border-rule space-y-3">
+                  {categories.map((category) => (
+                    <div key={category} className="flex items-center gap-3">
+                      <input
+                        type="text"
+                        defaultValue={category}
+                        onBlur={(e) => handleRenameCategory(category, e.target.value)}
+                        onKeyDown={(e) => {
+                          if (e.key === "Enter") {
+                            handleRenameCategory(category, e.currentTarget.value);
+                            e.currentTarget.blur();
+                          }
+                        }}
+                        className="flex-1 font-body text-base bg-transparent outline-none border-b border-transparent focus:border-rule"
+                      />
+                      <button
+                        type="button"
+                        onClick={() => handleRemoveCategory(category)}
+                        disabled={categories.length <= 1}
+                        className={`font-ui text-xs uppercase tracking-widest ${
+                          categories.length <= 1 ? "text-muted/40 cursor-not-allowed" : "text-muted hover:text-foreground cursor-pointer"
+                        }`}
+                      >
+                        remove
+                      </button>
+                    </div>
+                  ))}
+                  <div className="flex items-center gap-3 pt-1">
+                    <input
+                      type="text"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter") handleAddCategory();
+                      }}
+                      placeholder="new category"
+                      className="flex-1 font-body text-base bg-transparent outline-none placeholder:text-muted/50"
+                    />
+                    <button
+                      type="button"
+                      onClick={handleAddCategory}
+                      className="font-ui text-xs uppercase tracking-widest text-foreground cursor-pointer"
+                    >
+                      add
+                    </button>
+                  </div>
+                </div>
+              )}
               <div className="mt-3 pl-9 flex items-center gap-4">
                 <p className="font-ui text-xs uppercase tracking-widest text-muted">repeat</p>
                 <DaySelector activeDays={newHabitDays} onChange={setNewHabitDays} />
@@ -533,7 +686,14 @@ export default function Home() {
                   add
                 </button>
                 <button
-                  onClick={() => { setAdding(false); setNewHabit(""); setNewHabitDays(ALL_DAYS); setNewHabitCategory("Wellness"); }}
+                  onClick={() => {
+                    setAdding(false);
+                    setManagingCategories(false);
+                    setNewHabit("");
+                    setNewHabitDays(ALL_DAYS);
+                    setNewHabitCategory(categories[0] ?? DEFAULT_CATEGORIES[0]);
+                    setNewCategoryName("");
+                  }}
                   className="font-ui text-xs uppercase tracking-widest text-muted cursor-pointer"
                 >
                   cancel
@@ -572,6 +732,8 @@ export default function Home() {
                         key={habit.name}
                         name={habit.name}
                         activeDays={habit.activeDays}
+                        category={habit.category}
+                        categories={categories}
                         currentStreak={habit.currentStreak}
                         completed={false}
                         inactive
@@ -579,6 +741,7 @@ export default function Home() {
                         onToggle={() => {}}
                         onRemove={() => handleRemove(habit.name)}
                         onUpdateDays={(days) => handleUpdateDays(habit.name, days)}
+                        onUpdateCategory={(category) => handleUpdateCategory(habit.name, category)}
                       />
                     ))}
                   </ul>

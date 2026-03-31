@@ -1,4 +1,4 @@
-export type HabitCategory = "Wellness" | "Work" | "Personal";
+export type HabitCategory = string;
 
 export const CATEGORY_ORDER: HabitCategory[] = ["Wellness", "Work", "Personal"];
 
