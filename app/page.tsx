@@ -460,9 +460,9 @@ export default function Home() {
         {/* Habit Section — Today */}
         <section className="mb-12">
           {todayGrouped.length > 0 ? (
-            todayGrouped.map((group) => (
-              <div key={group.category}>
-                <p className="font-ui text-xs uppercase tracking-widest text-muted mt-8 first:mt-0 mb-1">
+            todayGrouped.map((group, index) => (
+              <div key={group.category} className={index > 0 ? "pt-5" : ""}>
+                <p className="font-ui text-xs uppercase tracking-widest text-muted mb-2">
                   {group.category}
                 </p>
                 <ul className="flex flex-col">
@@ -561,9 +561,9 @@ export default function Home() {
               <p className="font-ui text-xs uppercase tracking-widest text-muted/50 mt-10 mb-1">
                 not today
               </p>
-              {inactiveGrouped.map((group) => (
-                <div key={group.category}>
-                  <p className="font-ui text-xs uppercase tracking-widest text-muted/40 mt-4 mb-1">
+              {inactiveGrouped.map((group, index) => (
+                <div key={group.category} className={index > 0 ? "pt-4" : ""}>
+                  <p className="font-ui text-xs uppercase tracking-widest text-muted/40 mb-2">
                     {group.category}
                   </p>
                   <ul className="flex flex-col">
